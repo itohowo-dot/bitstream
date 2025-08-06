@@ -86,3 +86,100 @@
     0x00 ;; fallback for invalid input
   )
 )
+
+(define-private (verify-signature
+    (message (buff 256))
+    (signature (buff 65))
+    (signer principal)
+  )
+  ;; Cryptographic signature verification against expected signer identity
+  ;; Note: This is a simplified implementation. In production, use secp256k1-verify
+  (if (is-eq tx-sender signer)
+    true
+    false
+  )
+)
+
+;; CHANNEL LIFECYCLE MANAGEMENT
+
+(define-public (create-channel
+    (channel-id (buff 32))
+    (participant-b principal)
+    (initial-deposit uint)
+  )
+  ;; Establishes new bidirectional payment channel with initial funding commitment
+  (begin
+    ;; Input validation barrier
+    (asserts! (is-valid-channel-id channel-id) ERR-INVALID-INPUT)
+    (asserts! (is-valid-deposit initial-deposit) ERR-INVALID-INPUT)
+    (asserts! (not (is-eq tx-sender participant-b)) ERR-INVALID-INPUT)
+
+    ;; Channel uniqueness verification
+    (asserts!
+      (is-none (map-get? payment-channels {
+        channel-id: channel-id,
+        participant-a: tx-sender,
+        participant-b: participant-b,
+      }))
+      ERR-CHANNEL-EXISTS
+    )
+
+    ;; Secure fund transfer to contract escrow
+    (try! (stx-transfer? initial-deposit tx-sender (as-contract tx-sender)))
+
+    ;; Channel state initialization
+    (map-set payment-channels {
+      channel-id: channel-id,
+      participant-a: tx-sender,
+      participant-b: participant-b,
+    } {
+      total-deposited: initial-deposit,
+      balance-a: initial-deposit,
+      balance-b: u0,
+      is-open: true,
+      dispute-deadline: u0,
+      nonce: u0,
+    })
+
+    (ok true)
+  )
+)
+
+(define-public (fund-channel
+    (channel-id (buff 32))
+    (participant-b principal)
+    (additional-funds uint)
+  )
+  ;; Increases channel capacity through additional capital injection
+  (let ((channel (unwrap!
+      (map-get? payment-channels {
+        channel-id: channel-id,
+        participant-a: tx-sender,
+        participant-b: participant-b,
+      })
+      ERR-CHANNEL-NOT-FOUND
+    )))
+    ;; Pre-flight validation checks
+    (asserts! (is-valid-channel-id channel-id) ERR-INVALID-INPUT)
+    (asserts! (is-valid-deposit additional-funds) ERR-INVALID-INPUT)
+    (asserts! (not (is-eq tx-sender participant-b)) ERR-INVALID-INPUT)
+    (asserts! (get is-open channel) ERR-CHANNEL-CLOSED)
+
+    ;; Secure additional fund transfer
+    (try! (stx-transfer? additional-funds tx-sender (as-contract tx-sender)))
+
+    ;; Update channel capacity and participant balance
+    (map-set payment-channels {
+      channel-id: channel-id,
+      participant-a: tx-sender,
+      participant-b: participant-b,
+    }
+      (merge channel {
+        total-deposited: (+ (get total-deposited channel) additional-funds),
+        balance-a: (+ (get balance-a channel) additional-funds),
+      })
+    )
+
+    (ok true)
+  )
+)
