@@ -9,7 +9,7 @@ import {
   createStacksWalletConnectBridge,
   getStacksChainInfo,
   getStacksChainsForWalletConnect,
-} from "../wallet";
+} from "../src/wallet";
 
 describe("WalletConnect Integration", () => {
   describe("Chain Configuration", () => {
